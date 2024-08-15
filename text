@@ -1,0 +1,98 @@
+import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+import fitz  # PyMuPDF
+import string
+import random
+import ssl
+from sentence_transformers import SentenceTransformer, util
+
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+
+# Download NLTK data files (only need to run once)
+nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+pdf_path = '/Users/rajesh/Desktop/Pdfs/genai-principles.pdf'  # Path to your PDF file
+
+
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    with fitz.open(pdf_path) as pdf_document:
+        for page_num in range(len(pdf_document)):
+            page = pdf_document.load_page(page_num)
+            text += page.get_text()
+    return text
+
+
+text = extract_text_from_pdf(pdf_path)
+
+raw = text.lower()  # Converts to lowercase
+sent_tokens = nltk.sent_tokenize(raw)  # Converts to list of sentences
+
+# Initialize Sentence Transformer model
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+
+def generate_embeddings(sentences):
+    return model.encode(sentences, convert_to_tensor=True)
+
+
+GREETING_INPUTS = ("hello", "hi", "greetings", "sup", "what's up", "hey")
+GREETING_RESPONSES = ["hi", "hey", "*nods*", "hi there", "hello", "I am glad! You are talking to me"]
+
+
+def greeting(sentence):
+    for word in sentence.split():
+        if word.lower() in GREETING_INPUTS:
+            return random.choice(GREETING_RESPONSES)
+
+
+def response(user_response):
+    if not sent_tokens:
+        return "I don't have enough information to answer."
+
+    # Append the user response to sentences
+    sent_tokens.append(user_response)
+
+    # Generate embeddings for all sentences
+    embeddings = generate_embeddings(sent_tokens)
+
+    # Compute cosine similarity between the last sentence (user_response) and all other sentences
+    cosine_scores = util.pytorch_cos_sim(embeddings[-1], embeddings[:-1])
+
+    # Find the index of the most similar sentence
+    idx = cosine_scores.argmax()
+
+    # Remove the user response from sentences
+    sent_tokens.pop()
+
+    # Check similarity score
+    if cosine_scores[0][idx] > 0.5:  # You can adjust the threshold
+        return sent_tokens[idx]
+    else:
+        return "I am sorry! I don't understand you."
+
+
+flag = True
+print("ROBO: My name is Robo. I will answer your queries about Chatbots. If you want to exit, type Bye!")
+
+while flag:
+    user_response = input().lower()
+    if user_response != 'bye':
+        if user_response in ('thanks', 'thank you'):
+            flag = False
+            print("ROBO: You are welcome..")
+        else:
+            if greeting(user_response) is not None:
+                print("ROBO: " + greeting(user_response))
+            else:
+                print("ROBO: " + response(user_response))
+    else:
+        flag = False
+        print("ROBO: Bye! Take care..")
