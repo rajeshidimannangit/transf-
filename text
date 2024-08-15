@@ -4,7 +4,8 @@ import fitz  # PyMuPDF
 import string
 import random
 import ssl
-from sentence_transformers import SentenceTransformer, util
+import numpy as np
+from gensim.models import KeyedVectors
 
 try:
     _create_unverified_https_context = ssl._create_unverified_context
@@ -15,8 +16,6 @@ else:
 
 # Download NLTK data files (only need to run once)
 nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('wordnet')
 
 pdf_path = '/Users/rajesh/Desktop/Pdfs/genai-principles.pdf'  # Path to your PDF file
 
@@ -35,12 +34,38 @@ text = extract_text_from_pdf(pdf_path)
 raw = text.lower()  # Converts to lowercase
 sent_tokens = nltk.sent_tokenize(raw)  # Converts to list of sentences
 
-# Initialize Sentence Transformer model
-model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Load GloVe embeddings
+def load_glove_embeddings(file_path):
+    print(f"Loading GloVe embeddings from {file_path}...")
+    glove_model = KeyedVectors.load_word2vec_format(file_path, binary=False, no_header=True)
+    return glove_model
 
 
-def generate_embeddings(sentences):
-    return model.encode(sentences, convert_to_tensor=True)
+# Specify the path to your GloVe embeddings file
+glove_path = '/Users/rajesh/Downloads/glove.6B.50d.txt'  # Make sure to set the correct path
+glove_model = load_glove_embeddings(glove_path)
+
+
+def get_word_vector(word, glove_model):
+    try:
+        return glove_model[word]
+    except KeyError:
+        # Return a zero vector if the word is not in the vocabulary
+        return np.zeros(glove_model.vector_size)
+
+
+def get_sentence_vector(sentence, glove_model):
+    words = word_tokenize(sentence)
+    word_vectors = [get_word_vector(word, glove_model) for word in words]
+    return np.mean(word_vectors, axis=0)
+
+
+def cosine_similarity(vec1, vec2):
+    dot_product = np.dot(vec1, vec2)
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+    return dot_product / (norm1 * norm2)
 
 
 GREETING_INPUTS = ("hello", "hi", "greetings", "sup", "what's up", "hey")
@@ -57,24 +82,20 @@ def response(user_response):
     if not sent_tokens:
         return "I don't have enough information to answer."
 
-    # Append the user response to sentences
-    sent_tokens.append(user_response)
+    user_vector = get_sentence_vector(user_response, glove_model)
 
-    # Generate embeddings for all sentences
-    embeddings = generate_embeddings(sent_tokens)
+    best_match_idx = -1
+    best_similarity = -1
 
-    # Compute cosine similarity between the last sentence (user_response) and all other sentences
-    cosine_scores = util.pytorch_cos_sim(embeddings[-1], embeddings[:-1])
+    for i, sentence in enumerate(sent_tokens):
+        sentence_vector = get_sentence_vector(sentence, glove_model)
+        similarity = cosine_similarity(user_vector, sentence_vector)
+        if similarity > best_similarity:
+            best_similarity = similarity
+            best_match_idx = i
 
-    # Find the index of the most similar sentence
-    idx = cosine_scores.argmax()
-
-    # Remove the user response from sentences
-    sent_tokens.pop()
-
-    # Check similarity score
-    if cosine_scores[0][idx] > 0.5:  # You can adjust the threshold
-        return sent_tokens[idx]
+    if best_similarity > 0.5:  # Adjust threshold as needed
+        return sent_tokens[best_match_idx]
     else:
         return "I am sorry! I don't understand you."
 
@@ -96,3 +117,4 @@ while flag:
     else:
         flag = False
         print("ROBO: Bye! Take care..")
+
