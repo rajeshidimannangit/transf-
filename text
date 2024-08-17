@@ -1,120 +1,87 @@
-import nltk
-from nltk.tokenize import word_tokenize, sent_tokenize
-import fitz  # PyMuPDF
-import string
-import random
-import ssl
-import numpy as np
+import pdfplumber
+import re
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
 from gensim.models import KeyedVectors
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
-try:
-    _create_unverified_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
-else:
-    ssl._create_default_https_context = _create_unverified_https_context
-
-# Download NLTK data files (only need to run once)
-nltk.download('punkt')
-
-pdf_path = '/Users/rajesh/Desktop/Pdfs/genai-principles.pdf'  # Path to your PDF file
-
-
+# Function to extract text from PDF
 def extract_text_from_pdf(pdf_path):
     text = ""
-    with fitz.open(pdf_path) as pdf_document:
-        for page_num in range(len(pdf_document)):
-            page = pdf_document.load_page(page_num)
-            text += page.get_text()
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text()
     return text
 
+# Function to preprocess text
+def preprocess_text(text):
+    text = text.lower()
+    text = re.sub(r'\s+', ' ', text)
+    tokens = word_tokenize(text)
+    tokens = [word for word in tokens if word.isalnum()]
+    stop_words = set(stopwords.words('english'))
+    tokens = [word for word in tokens if word not in stop_words]
+    return tokens
 
-text = extract_text_from_pdf(pdf_path)
-
-raw = text.lower()  # Converts to lowercase
-sent_tokens = nltk.sent_tokenize(raw)  # Converts to list of sentences
-
-
-# Load GloVe embeddings
-def load_glove_embeddings(file_path):
-    print(f"Loading GloVe embeddings from {file_path}...")
-    glove_model = KeyedVectors.load_word2vec_format(file_path, binary=False, no_header=True)
-    return glove_model
-
-
-# Specify the path to your GloVe embeddings file
-glove_path = '/Users/rajesh/Downloads/glove.6B.50d.txt'  # Make sure to set the correct path
-glove_model = load_glove_embeddings(glove_path)
-
-
-def get_word_vector(word, glove_model):
-    try:
-        return glove_model[word]
-    except KeyError:
-        # Return a zero vector if the word is not in the vocabulary
-        return np.zeros(glove_model.vector_size)
-
-
-def get_sentence_vector(sentence, glove_model):
-    words = word_tokenize(sentence)
-    word_vectors = [get_word_vector(word, glove_model) for word in words]
-    return np.mean(word_vectors, axis=0)
-
-
-def cosine_similarity(vec1, vec2):
-    dot_product = np.dot(vec1, vec2)
-    norm1 = np.linalg.norm(vec1)
-    norm2 = np.linalg.norm(vec2)
-    return dot_product / (norm1 * norm2)
-
-
-GREETING_INPUTS = ("hello", "hi", "greetings", "sup", "what's up", "hey")
-GREETING_RESPONSES = ["hi", "hey", "*nods*", "hi there", "hello", "I am glad! You are talking to me"]
-
-
-def greeting(sentence):
-    for word in sentence.split():
-        if word.lower() in GREETING_INPUTS:
-            return random.choice(GREETING_RESPONSES)
-
-
-def response(user_response):
-    if not sent_tokens:
-        return "I don't have enough information to answer."
-
-    user_vector = get_sentence_vector(user_response, glove_model)
-
-    best_match_idx = -1
-    best_similarity = -1
-
-    for i, sentence in enumerate(sent_tokens):
-        sentence_vector = get_sentence_vector(sentence, glove_model)
-        similarity = cosine_similarity(user_vector, sentence_vector)
-        if similarity > best_similarity:
-            best_similarity = similarity
-            best_match_idx = i
-
-    if best_similarity > 0.5:  # Adjust threshold as needed
-        return sent_tokens[best_match_idx]
+# Function to get average vector of tokens
+def get_average_vector(tokens, model):
+    vectors = [model[word] for word in tokens if word in model]
+    if vectors:
+        return sum(vectors) / len(vectors)
     else:
-        return "I am sorry! I don't understand you."
+        return None
 
+# Load pre-trained Word2Vec model
+def load_word2vec_model(model_path):
+    return KeyedVectors.load_word2vec_format(model_path, binary=True)
 
-flag = True
-print("ROBO: My name is Robo. I will answer your queries about Chatbots. If you want to exit, type Bye!")
-
-while flag:
-    user_response = input().lower()
-    if user_response != 'bye':
-        if user_response in ('thanks', 'thank you'):
-            flag = False
-            print("ROBO: You are welcome..")
-        else:
-            if greeting(user_response) is not None:
-                print("ROBO: " + greeting(user_response))
-            else:
-                print("ROBO: " + response(user_response))
+# Function to compute cosine similarity
+def compute_similarity(vector1, vector2):
+    if vector1 is not None and vector2 is not None:
+        return cosine_similarity([vector1], [vector2])[0][0]
     else:
-        flag = False
-        print("ROBO: Bye! Take care..")
+        return 0
 
+# Function to split text into sections
+def split_text_into_sections(text, section_length=500):
+    return [text[i:i + section_length] for i in range(0, len(text), section_length)]
+
+# Main function to perform semantic search
+def semantic_search(pdf_path, query, model_path):
+    # Extract and preprocess PDF text
+    pdf_text = extract_text_from_pdf(pdf_path)
+    pdf_tokens = preprocess_text(pdf_text)
+    
+    # Load Word2Vec model
+    model = load_word2vec_model(model_path)
+    
+    # Vectorize the entire PDF text
+    pdf_text_vector = get_average_vector(pdf_tokens, model)
+    
+    # Vectorize the user query
+    query_tokens = preprocess_text(query)
+    query_vector = get_average_vector(query_tokens, model)
+    
+    # Split PDF text into sections and vectorize each section
+    sections = split_text_into_sections(pdf_text)
+    section_vectors = [get_average_vector(preprocess_text(section), model) for section in sections]
+    
+    # Compute similarity scores for each section
+    section_similarities = [compute_similarity(query_vector, section_vector) for section_vector in section_vectors]
+    
+    # Find the most relevant section
+    most_relevant_index = np.argmax(section_similarities)
+    most_relevant_section = sections[most_relevant_index]
+    
+    return most_relevant_section
+
+# Example usage
+pdf_path = 'path/to/your/document.pdf'  # Replace with your PDF path
+user_query = 'your search query here'  # Replace with your query
+model_path = 'path/to/word2vec.bin'  # Replace with your Word2Vec model path
+
+# Perform semantic search
+result = semantic_search(pdf_path, user_query, model_path)
+print("Most relevant section based on your query:")
+print(result)
