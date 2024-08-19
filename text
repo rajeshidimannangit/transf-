@@ -6,6 +6,7 @@ from gensim.models import KeyedVectors
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
+
 # Function to extract text from PDF
 def extract_text_from_pdf(pdf_path):
     text = ""
@@ -13,6 +14,7 @@ def extract_text_from_pdf(pdf_path):
         for page in pdf.pages:
             text += page.extract_text()
     return text
+
 
 # Function to preprocess text
 def preprocess_text(text):
@@ -24,6 +26,7 @@ def preprocess_text(text):
     tokens = [word for word in tokens if word not in stop_words]
     return tokens
 
+
 # Function to get average vector of tokens
 def get_average_vector(tokens, model):
     vectors = [model[word] for word in tokens if word in model]
@@ -32,9 +35,11 @@ def get_average_vector(tokens, model):
     else:
         return None
 
+
 # Load pre-trained Word2Vec model
 def load_word2vec_model(model_path):
     return KeyedVectors.load_word2vec_format(model_path, binary=True)
+
 
 # Function to compute cosine similarity
 def compute_similarity(vector1, vector2):
@@ -43,43 +48,46 @@ def compute_similarity(vector1, vector2):
     else:
         return 0
 
+
 # Function to split text into sections
-def split_text_into_sections(text, section_length=500):
+def split_text_into_sections(text, section_length=1000):
     return [text[i:i + section_length] for i in range(0, len(text), section_length)]
+
 
 # Main function to perform semantic search
 def semantic_search(pdf_path, query, model_path):
     # Extract and preprocess PDF text
     pdf_text = extract_text_from_pdf(pdf_path)
     pdf_tokens = preprocess_text(pdf_text)
-    
+
     # Load Word2Vec model
     model = load_word2vec_model(model_path)
-    
+
     # Vectorize the entire PDF text
     pdf_text_vector = get_average_vector(pdf_tokens, model)
-    
+
     # Vectorize the user query
     query_tokens = preprocess_text(query)
     query_vector = get_average_vector(query_tokens, model)
-    
+
     # Split PDF text into sections and vectorize each section
     sections = split_text_into_sections(pdf_text)
     section_vectors = [get_average_vector(preprocess_text(section), model) for section in sections]
-    
+
     # Compute similarity scores for each section
     section_similarities = [compute_similarity(query_vector, section_vector) for section_vector in section_vectors]
-    
+
     # Find the most relevant section
     most_relevant_index = np.argmax(section_similarities)
     most_relevant_section = sections[most_relevant_index]
-    
+
     return most_relevant_section
 
+
 # Example usage
-pdf_path = 'path/to/your/document.pdf'  # Replace with your PDF path
-user_query = 'your search query here'  # Replace with your query
-model_path = 'path/to/word2vec.bin'  # Replace with your Word2Vec model path
+pdf_path = '/Users/rajesh/Desktop/Pdfs/genai-principles.pdf'  # Replace with your PDF path
+user_query = 'tell me about the conclusion'  # Replace with your query
+model_path = '/Users/rajesh/Downloads/GoogleNews-vectors-negative300.bin'  # Replace with your Word2Vec model path
 
 # Perform semantic search
 result = semantic_search(pdf_path, user_query, model_path)
